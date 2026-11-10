@@ -25,12 +25,18 @@ import com.nononsenseapps.feeder.localtranslation.BergamotModelDownloadProgress
 import com.nononsenseapps.feeder.localtranslation.BergamotModelManager
 import com.nononsenseapps.feeder.localtranslation.LocalTranslator
 import com.nononsenseapps.feeder.model.FeedUnreadCount
+import com.nononsenseapps.feeder.model.LoadOlderMessage
+import com.nononsenseapps.feeder.model.LoadOlderUiState
 import com.nononsenseapps.feeder.model.LocaleOverride
 import com.nononsenseapps.feeder.model.PlaybackStatus
 import com.nononsenseapps.feeder.model.PodcastPlayerState
 import com.nononsenseapps.feeder.model.PodcastPlayerStateHolder
+import com.nononsenseapps.feeder.model.RssLocalSync
 import com.nononsenseapps.feeder.model.TTSStateHolder
 import com.nononsenseapps.feeder.model.TranslationManager
+import com.nononsenseapps.feeder.model.feedOffersOlderPages
+import com.nononsenseapps.feeder.model.loadOlderUiState
+import com.nononsenseapps.feeder.model.toLoadOlderMessage
 import com.nononsenseapps.feeder.openai.canUseAsTranslationApi
 import com.nononsenseapps.feeder.openai.isLocalTranslation
 import com.nononsenseapps.feeder.ui.compose.feed.FeedListItem
@@ -39,12 +45,15 @@ import com.nononsenseapps.feeder.ui.compose.text.htmlToAnnotatedString
 import com.nononsenseapps.feeder.util.Either
 import com.nononsenseapps.feeder.util.FilePathProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -61,6 +70,7 @@ class FeedViewModel(
 ) : DIAwareViewModel(di),
     FeedListFilterCallback {
     private val repository: Repository by instance()
+    private val rssLocalSync: RssLocalSync by instance()
     private val ttsStateHolder: TTSStateHolder by instance()
     val readAloudProgress = ttsStateHolder.progress
 
@@ -459,7 +469,54 @@ class FeedViewModel(
         markAsRead(itemId)
     }
 
-    val viewState: StateFlow<FeedScreenViewState> =
+    private val loadOlderTransient = MutableStateFlow(LoadOlderTransient())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val loadOlderUi: Flow<LoadOlderUiState> =
+        combine(repository.currentFeedAndTag, loadOlderTransient) { feedAndTag, transient ->
+            feedAndTag to transient
+        }.flatMapLatest { (feedAndTag, transient) ->
+            val (feedId, _) = feedAndTag
+            if (feedId <= ID_UNSET) {
+                flowOf(LoadOlderUiState())
+            } else {
+                repository.getFeedFlow(feedId).map { feed ->
+                    val matches = transient.feedId == feedId
+                    loadOlderUiState(
+                        offersOlder =
+                            feed?.let {
+                                feedOffersOlderPages(
+                                    mode = it.paginationMode,
+                                    exhausted = it.paginationExhausted,
+                                    nextUrl = it.nextArchiveUrl,
+                                )
+                            } ?: false,
+                        loading = matches && transient.loading,
+                        message = if (matches) transient.message else LoadOlderMessage.None,
+                    )
+                }
+            }
+        }
+
+    fun loadOlderArticles() {
+        val feedId = repository.currentFeedAndTag.value.first
+        if (feedId <= ID_UNSET) return
+        val inFlight = loadOlderTransient.value
+        if (inFlight.loading && inFlight.feedId == feedId) return
+        viewModelScope.launch {
+            loadOlderTransient.value = LoadOlderTransient(loading = true, feedId = feedId)
+            val outcome = rssLocalSync.loadOlderArticles(feedId)
+            if (loadOlderTransient.value.feedId != feedId) return@launch
+            loadOlderTransient.value =
+                LoadOlderTransient(
+                    loading = false,
+                    feedId = feedId,
+                    message = outcome.toLoadOlderMessage(),
+                )
+        }
+    }
+
+    private val feedScreenState =
         combine(
             // 0
             repository.showFab,
@@ -543,6 +600,11 @@ class FeedViewModel(
                 translationModelDownloadProgress = params[28] as BergamotModelDownloadProgress?,
                 forceSingleColumn = params[31] as Boolean,
             )
+        }
+
+    val viewState: StateFlow<FeedScreenViewState> =
+        combine(feedScreenState, loadOlderUi) { state, loadOlder ->
+            state.copy(loadOlder = loadOlder)
         }.stateIn(
             viewModelScope,
             SharingStarted.Eagerly,
@@ -698,6 +760,7 @@ data class FeedState(
     override val isOpenDrawerOnFab: Boolean = false,
     override val translationModelDownloadProgress: BergamotModelDownloadProgress? = null,
     override val forceSingleColumn: Boolean = false,
+    override val loadOlder: LoadOlderUiState = LoadOlderUiState(),
 ) : FeedScreenViewState
 
 @Immutable
@@ -733,7 +796,14 @@ interface FeedScreenViewState {
     val isOpenDrawerOnFab: Boolean
     val translationModelDownloadProgress: BergamotModelDownloadProgress?
     val forceSingleColumn: Boolean
+    val loadOlder: LoadOlderUiState
 }
+
+private data class LoadOlderTransient(
+    val loading: Boolean = false,
+    val feedId: Long = ID_UNSET,
+    val message: LoadOlderMessage = LoadOlderMessage.None,
+)
 
 private data class FeedCardTranslationConfig(
     val enabled: Boolean,

@@ -36,6 +36,8 @@ class FeedStore(
 
     suspend fun getFeed(feedId: Long): Feed? = feedDao.getFeed(feedId = feedId)
 
+    fun getFeedFlow(feedId: Long): Flow<Feed?> = feedDao.loadFeedFlow(feedId)
+
     suspend fun getFeed(url: URL): Feed? = feedDao.loadFeedWithUrl(url)
 
     suspend fun saveFeed(feed: Feed): Long =

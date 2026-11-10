@@ -7,6 +7,8 @@ data class ParsedFeed(
     val description: String? = null,
     val user_comment: String? = null,
     val next_url: String? = null,
+    val prev_archive_url: String? = null,
+    val generator: String? = null,
     val icon: String? = null,
     val favicon: String? = null,
     val author: ParsedAuthor? = null,

@@ -3,6 +3,7 @@ package com.nononsenseapps.feeder.model.opml
 import android.util.Log
 import android.util.Xml
 import com.nononsenseapps.feeder.db.room.Feed
+import com.nononsenseapps.feeder.model.FeedPaginationMode
 import com.nononsenseapps.feeder.model.OPMLParserHandler
 import com.nononsenseapps.feeder.util.Either
 import com.nononsenseapps.feeder.util.flatMap
@@ -51,6 +52,8 @@ private const val ATTR_FETCH_OG_IMAGES = "fetchOgImages"
 private const val ATTR_BLOCK_RULES = "blockRules"
 
 private const val ATTR_ALLOW_RULES = "allowRules"
+
+private const val ATTR_PAGINATION_MODE = "paginationMode"
 
 private const val TAG_BLOCKED = "blocked"
 
@@ -312,6 +315,11 @@ class OpmlPullParser(
                             parser
                                 .getAttributeValue(OPML_FEEDER_NAMESPACE, ATTR_ALLOW_RULES)
                                 ?: feed.allowRules,
+                        paginationMode =
+                            parser
+                                .getAttributeValue(OPML_FEEDER_NAMESPACE, ATTR_PAGINATION_MODE)
+                                ?.let { FeedPaginationMode.fromStored(it).name }
+                                ?: feed.paginationMode,
                         imageUrl =
                             parser
                                 .getAttributeValue(OPML_FEEDER_NAMESPACE, ATTR_IMAGE_URL)

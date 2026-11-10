@@ -227,7 +227,15 @@ class FeedParser(
     private fun parseFeedBytes(
         url: URL,
         body: ByteArray,
-    ): ParsedFeed? = goFeedAdapter.parseBody(body)?.asFeed(url)
+    ): ParsedFeed? {
+        val parsed = goFeedAdapter.parseBody(body)?.asFeed(url) ?: return null
+        val links = extractFeedPagination(body)
+        return parsed.copy(
+            next_url = links.nextUrl ?: parsed.next_url,
+            prev_archive_url = links.prevArchiveUrl ?: parsed.prev_archive_url,
+            generator = links.generator ?: parsed.generator,
+        )
+    }
 
     /**
      * Takes body as bytes to handle encoding correctly
@@ -291,7 +299,8 @@ private fun GoFeed.asFeed(url: URL): ParsedFeed =
         feed_url = url.toString(),
         description = description,
         user_comment = "",
-        next_url = "",
+        next_url = null,
+        generator = generator,
         icon = image?.url?.let { relativeLinkIntoAbsolute(url, it) },
         favicon = null,
         author = author?.asParsedAuthor(),
