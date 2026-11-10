@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -522,6 +523,7 @@ fun FeedScreen(
             pagedFeedItems = pagedFeedItems,
             translatedFeedCards = translatedFeedCards,
             onTranslateFeedCard = viewModel::translateFeedCardIfNeeded,
+            onLoadOlder = viewModel::loadOlderArticles,
         )
     }
 }
@@ -580,6 +582,7 @@ fun FeedScreen(
     translatedFeedCards: TranslatedFeedCards,
     onTranslateFeedCard: (FeedListItem) -> Unit,
     modifier: Modifier = Modifier,
+    onLoadOlder: () -> Unit = {},
     readAloudProgress: StateFlow<ReadAloudProgress>? = null,
     ttsOnSeekTo: (Long) -> Unit = {},
     ttsOnGoToSpokenText: () -> Unit = {},
@@ -1086,6 +1089,7 @@ fun FeedScreen(
                     pagedFeedItems = pagedFeedItems,
                     translatedFeedCards = translatedFeedCards,
                     onTranslateFeedCard = onTranslateFeedCard,
+                    onLoadOlder = onLoadOlder,
                     modifier = innerModifier,
                 )
 
@@ -1115,6 +1119,7 @@ fun FeedScreen(
                     pagedFeedItems = pagedFeedItems,
                     translatedFeedCards = translatedFeedCards,
                     onTranslateFeedCard = onTranslateFeedCard,
+                    onLoadOlder = onLoadOlder,
                     modifier = innerModifier,
                 )
         }
@@ -1397,6 +1402,7 @@ fun FeedListContent(
     translatedFeedCards: TranslatedFeedCards,
     onTranslateFeedCard: (FeedListItem) -> Unit,
     modifier: Modifier = Modifier,
+    onLoadOlder: () -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
     val activityLauncher: ActivityLauncher by LocalDI.current.instance()
@@ -1636,6 +1642,17 @@ fun FeedListContent(
                         )
                     }
                 }
+                if (viewState.loadOlder.visible) {
+                    item(
+                        key = "LoadOlder",
+                        contentType = "LoadOlder",
+                    ) {
+                        LoadOlderFooter(
+                            state = viewState.loadOlder,
+                            onLoadOlder = onLoadOlder,
+                        )
+                    }
+                }
                 /*
                 This item is providing padding for the FAB
                  */
@@ -1677,6 +1694,7 @@ fun FeedGridContent(
     translatedFeedCards: TranslatedFeedCards,
     onTranslateFeedCard: (FeedListItem) -> Unit,
     modifier: Modifier = Modifier,
+    onLoadOlder: () -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
     val activityLauncher: ActivityLauncher by LocalDI.current.instance()
@@ -1868,6 +1886,18 @@ fun FeedGridContent(
                             },
                         swipeEnabled = !gridState.isScrollInProgress,
                     )
+                }
+                if (viewState.loadOlder.visible) {
+                    item(
+                        key = "LoadOlder",
+                        contentType = "LoadOlder",
+                        span = StaggeredGridItemSpan.FullLine,
+                    ) {
+                        LoadOlderFooter(
+                            state = viewState.loadOlder,
+                            onLoadOlder = onLoadOlder,
+                        )
+                    }
                 }
             }
         }

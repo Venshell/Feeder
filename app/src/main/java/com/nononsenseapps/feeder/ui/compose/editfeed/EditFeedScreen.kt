@@ -71,6 +71,9 @@ import com.nononsenseapps.feeder.archmodel.PREF_VAL_OPEN_WITH_BROWSER
 import com.nononsenseapps.feeder.archmodel.PREF_VAL_OPEN_WITH_CUSTOM_TAB
 import com.nononsenseapps.feeder.archmodel.PREF_VAL_OPEN_WITH_READER
 import com.nononsenseapps.feeder.model.ArticleRuleError
+import com.nononsenseapps.feeder.model.PAGINATION_MODE_AUTO
+import com.nononsenseapps.feeder.model.PAGINATION_MODE_OFF
+import com.nononsenseapps.feeder.model.PAGINATION_MODE_WORDPRESS
 import com.nononsenseapps.feeder.ui.compose.components.AutoCompleteResults
 import com.nononsenseapps.feeder.ui.compose.components.OkCancelWithContent
 import com.nononsenseapps.feeder.ui.compose.feed.ExplainPermissionDialog
@@ -536,6 +539,39 @@ fun ColumnScope.RightContent(
         startingSpace = false,
         height = 48.dp,
     ) {
+        Text(stringResource(id = R.string.older_articles))
+    }
+    Text(
+        text = stringResource(id = R.string.older_articles_desc),
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.width(LocalDimens.current.maxContentWidth),
+    )
+    RadioButtonSetting(
+        title = stringResource(id = R.string.older_articles_auto),
+        selected = viewState.paginationMode == PAGINATION_MODE_AUTO,
+        onClick = { viewState.paginationMode = PAGINATION_MODE_AUTO },
+        icon = null,
+        minHeight = 48.dp,
+    )
+    RadioButtonSetting(
+        title = stringResource(id = R.string.older_articles_wordpress),
+        selected = viewState.paginationMode == PAGINATION_MODE_WORDPRESS,
+        onClick = { viewState.paginationMode = PAGINATION_MODE_WORDPRESS },
+        icon = null,
+        minHeight = 48.dp,
+    )
+    RadioButtonSetting(
+        title = stringResource(id = R.string.older_articles_off),
+        selected = viewState.paginationMode == PAGINATION_MODE_OFF,
+        onClick = { viewState.paginationMode = PAGINATION_MODE_OFF },
+        icon = null,
+        minHeight = 48.dp,
+    )
+    HorizontalDivider(modifier = Modifier.fillMaxWidth())
+    GroupTitle(
+        startingSpace = false,
+        height = 48.dp,
+    ) {
         Text(stringResource(id = R.string.open_item_by_default_with))
     }
     RadioButtonSetting(
@@ -691,6 +727,7 @@ interface EditFeedScreenState {
     var fetchOgImages: Boolean
     var blockRules: String
     var allowRules: String
+    var paginationMode: String
     val blockRulesError: ArticleRuleError?
     val allowRulesError: ArticleRuleError?
     val isOkToSave: Boolean
@@ -731,6 +768,7 @@ private class ScreenState(
     override var fetchOgImages: Boolean by mutableStateOf(false)
     override var blockRules: String by mutableStateOf("")
     override var allowRules: String by mutableStateOf("")
+    override var paginationMode: String by mutableStateOf(PAGINATION_MODE_AUTO)
 }
 
 @Preview("Edit Feed Phone")

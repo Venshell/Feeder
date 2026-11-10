@@ -57,6 +57,11 @@ const val COL_SUMMARIZE_ON_OPEN = "summarize_on_open"
 const val COL_FETCH_OG_IMAGES = "fetch_og_images"
 const val COL_BLOCK_RULES = "block_rules"
 const val COL_ALLOW_RULES = "allow_rules"
+const val COL_PAGINATION_MODE = "pagination_mode"
+const val COL_LOADED_PAGE = "loaded_page"
+const val COL_NEXT_ARCHIVE_URL = "next_archive_url"
+const val COL_PAGINATION_EXHAUSTED = "pagination_exhausted"
+const val COL_LOADED_FROM_PAGE = "loaded_from_page"
 
 // year 5000
 val FAR_FUTURE = Instant.ofEpochSecond(95635369646)

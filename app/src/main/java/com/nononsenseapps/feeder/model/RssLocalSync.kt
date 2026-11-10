@@ -21,6 +21,7 @@ import com.nononsenseapps.feeder.util.right
 import com.nononsenseapps.feeder.util.sloppyLinkToStrictURLNoThrows
 import com.nononsenseapps.feeder.util.urlHasNoAuthParams
 import com.nononsenseapps.feeder.util.urlHasNoQueryParams
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -297,121 +298,15 @@ class RssLocalSync(
                         FetchError(url = url.toString(), throwable = t)
                     },
                 ) {
-                    val items = feed.items
-                    val uniqueIdCount = items?.map { it.id }?.toSet()?.size
-                    // This can only detect between items present in one feed. See NIXOS
-                    val isNotUniqueIds = uniqueIdCount != items?.size
-
-                    val alreadyReadGuids = repository.getGuidsWhichAreSyncedAsReadInFeed(feedSql)
-
-                    // Compiled once per feed per sync. Never inside the item loop.
-                    val articleFilterRules =
-                        ArticleFilterRules.compile(
-                            blockRulesText = feedSql.blockRules,
-                            allowRulesText = feedSql.allowRules,
+                    val upserted =
+                        upsertParsedFeedItems(
+                            feedSql = feedSql,
+                            parsedFeed = feed,
+                            downloadTime = downloadTime,
+                            loadedFromPage = 0,
                         )
+                    val feedItemSqls = upserted.pairs
 
-                    val itemsWithGuids =
-                        items
-                            ?.map {
-                                val guid =
-                                    when (isNotUniqueIds || feedSql.alternateId) {
-                                        true -> it.alternateId
-                                        else -> it.id ?: it.alternateId
-                                    }
-
-                                it to guid
-                                // Feed convention: items are listed newest-first.
-                                // Reverse so we process oldest-first, giving items at higher
-                                // indices (earlier in the feed) a more recent fallback timestamp.
-                            }?.reversed()
-                            ?: emptyList()
-
-                    val totalItems = itemsWithGuids.size
-
-                    val feedItemSqls =
-                        itemsWithGuids
-                            .mapIndexedNotNull { index, (item, guid) ->
-                                // Per-feed block/allow rules. Applied before any DB read, og:image fetch,
-                                // or blob write, so a filtered item never becomes a row, file, or notification.
-                                //
-                                // Deliberately inside this lambda rather than before it: filtering the list
-                                // earlier would change the input of the isNotUniqueIds computation (flipping
-                                // the guid scheme for the whole feed) and would renumber index/totalItems,
-                                // making the fallback clock of a kept item depend on how many other items
-                                // were filtered ahead of it.
-                                if (!ArticleFilterPolicy.shouldKeep(item, articleFilterRules)) {
-                                    logDebug(LOG_TAG, "Filtered by feed rules: [${item.title}] [${feed.title}]")
-                                    return@mapIndexedNotNull null
-                                }
-
-                                // Each undated item in the feed gets a distinct fallback clock.
-                                // Items are in reversed feed order here (oldest position = index 0),
-                                // so higher indices correspond to items that appeared earlier in the feed
-                                // and should therefore be considered more recent.
-                                val fallbackClock =
-                                    Clock.fixed(
-                                        downloadTime.minusSeconds((totalItems - 1 - index).toLong()),
-                                        ZoneOffset.UTC,
-                                    )
-                                // Always attempt to load existing items using both id schemes
-                                // Id is rewritten to preferred on update
-                                val feedItemSql =
-                                    repository.loadFeedItem(
-                                        guid = item.alternateId,
-                                        feedId = feedSql.id,
-                                    ) ?: repository.loadFeedItem(
-                                        guid = item.id ?: item.alternateId,
-                                        feedId = feedSql.id,
-                                    ) ?: FeedItem(firstSyncedTime = downloadTime)
-
-                                // If new item, see if duplicates exist
-                                if (feedItemSql.id != ID_UNSET ||
-                                    !feedSql.skipDuplicates ||
-                                    !repository.duplicateStoryExists(
-                                        id = feedItemSql.id,
-                                        title = item.title ?: "",
-                                        link = item.url,
-                                    )
-                                ) {
-                                    feedItemSql.updateFromParsedEntry(item, guid, feed, fallbackClock)
-                                    feedItemSql.feedId = feedSql.id
-
-                                    if (feedSql.fetchOgImages) {
-                                        feedItemSql.thumbnailImage =
-                                            resolveThumbnailImage(
-                                                current = feedItemSql.thumbnailImage,
-                                                articleUrl = item.url,
-                                                hasFeedImage = item.hasFeedImage,
-                                            )
-                                    }
-
-                                    if (feedItemSql.guid in alreadyReadGuids) {
-                                        // TODO get read time from sync service
-                                        feedItemSql.readTime = feedItemSql.readTime ?: Instant.now()
-                                        feedItemSql.notified = true
-                                    }
-
-                                    feedItemSql to (item.content_html ?: item.content_text ?: "")
-                                } else {
-                                    Log.i(LOG_TAG, "Duplicate story ignored: [${item.title}] [${feed.title}]")
-                                    null
-                                }
-                            } ?: emptyList()
-
-                    repository.upsertFeedItems(feedItemSqls) { feedItem, text ->
-                        filePathProvider.articleDir.mkdirs()
-                        blobOutputStream(feedItem.id, filePathProvider.articleDir)
-                            .bufferedWriter()
-                            .use {
-                                it.write(text)
-                            }
-                        // If this item was pre-marked as read from a remote read-mark (alreadyReadGuids),
-                        // immediately set it as synced so it won't be echoed back to the server.
-                        if (feedItem.guid in alreadyReadGuids) {
-                            repository.setSynced(feedItem.id)
-                        }
-                    }
                     // Try to look for image if not done before
                     if (feedSql.imageUrl == null && feedSql.siteFetched == Instant.EPOCH) {
                         val siteUrl =
@@ -451,6 +346,8 @@ class RssLocalSync(
                     feedSql.imageUrl = feed.icon?.let { sloppyLinkToStrictURLNoThrows(it) }
                         ?: feedSql.imageUrl
 
+                    applyLivePaginationCursor(feedSql, feed)
+
                     repository.upsertFeed(feedSql)
 
                     // Finally, prune database of old items
@@ -469,7 +366,7 @@ class RssLocalSync(
                                 // shrinks (or the user lowers the max item count) so that stored rows
                                 // exceed keepCount, a still-served article that the rules now filter can
                                 // be pruned, since it is absent from presentIds.
-                                keepCount = max(maxFeedItemCount, items?.size ?: 0),
+                                keepCount = max(maxFeedItemCount, upserted.parsedCount),
                             ).filterNot { id ->
                                 // Don't delete articles that are present in feed or currently selected
                                 id in presentIds || id == repository.currentArticleId.value
@@ -555,6 +452,326 @@ class RssLocalSync(
                     repository.syncLoadFeeds(retryAfter = Instant.now())
                 }
         }
+
+    private data class ParsedItemUpsert(
+        val pairs: List<Pair<FeedItem, String>>,
+        val parsedCount: Int,
+        val newCount: Int,
+    )
+
+    /**
+     * Insert or update the articles from one parsed document.
+     * [loadedFromPage] is 0 for the subscription document. A positive value marks
+     * newly inserted rows as coming from that older page so max-items cleanup
+     * leaves them in place, and suppresses notifications for them.
+     */
+    private suspend fun upsertParsedFeedItems(
+        feedSql: Feed,
+        parsedFeed: ParsedFeed,
+        downloadTime: Instant,
+        loadedFromPage: Int,
+    ): ParsedItemUpsert {
+        val items = parsedFeed.items
+        val uniqueIdCount = items?.map { it.id }?.toSet()?.size
+        // This can only detect between items present in one feed. See NIXOS
+        val isNotUniqueIds = uniqueIdCount != items?.size
+
+        val alreadyReadGuids = repository.getGuidsWhichAreSyncedAsReadInFeed(feedSql)
+
+        // Compiled once per feed per sync. Never inside the item loop.
+        val articleFilterRules =
+            ArticleFilterRules.compile(
+                blockRulesText = feedSql.blockRules,
+                allowRulesText = feedSql.allowRules,
+            )
+
+        val itemsWithGuids =
+            items
+                ?.map {
+                    val guid =
+                        when (isNotUniqueIds || feedSql.alternateId) {
+                            true -> it.alternateId
+                            else -> it.id ?: it.alternateId
+                        }
+
+                    it to guid
+                    // Feed convention: items are listed newest-first.
+                    // Reverse so we process oldest-first, giving items at higher
+                    // indices (earlier in the feed) a more recent fallback timestamp.
+                }?.reversed()
+                ?: emptyList()
+
+        val totalItems = itemsWithGuids.size
+
+        var newCount = 0
+        val feedItemSqls =
+            itemsWithGuids
+                .mapIndexedNotNull { index, (item, guid) ->
+                    // Per-feed block/allow rules. Applied before any DB read, og:image fetch,
+                    // or blob write, so a filtered item never becomes a row, file, or notification.
+                    //
+                    // Deliberately inside this lambda rather than before it: filtering the list
+                    // earlier would change the input of the isNotUniqueIds computation (flipping
+                    // the guid scheme for the whole feed) and would renumber index/totalItems,
+                    // making the fallback clock of a kept item depend on how many other items
+                    // were filtered ahead of it.
+                    if (!ArticleFilterPolicy.shouldKeep(item, articleFilterRules)) {
+                        logDebug(LOG_TAG, "Filtered by feed rules: [${item.title}] [${parsedFeed.title}]")
+                        return@mapIndexedNotNull null
+                    }
+
+                    // Each undated item in the feed gets a distinct fallback clock.
+                    // Items are in reversed feed order here (oldest position = index 0),
+                    // so higher indices correspond to items that appeared earlier in the feed
+                    // and should therefore be considered more recent.
+                    // Archive pages are shifted back by a day per page so undated
+                    // items sort behind the live page instead of appearing as new.
+                    val archiveAgeSeconds = if (loadedFromPage > 0) loadedFromPage * 86_400L else 0L
+                    val fallbackClock =
+                        Clock.fixed(
+                            downloadTime.minusSeconds(
+                                archiveAgeSeconds + (totalItems - 1 - index).toLong(),
+                            ),
+                            ZoneOffset.UTC,
+                        )
+                    // Always attempt to load existing items using both id schemes
+                    // Id is rewritten to preferred on update
+                    val feedItemSql =
+                        repository.loadFeedItem(
+                            guid = item.alternateId,
+                            feedId = feedSql.id,
+                        ) ?: repository.loadFeedItem(
+                            guid = item.id ?: item.alternateId,
+                            feedId = feedSql.id,
+                        ) ?: FeedItem(firstSyncedTime = downloadTime)
+
+                    // If new item, see if duplicates exist
+                    if (feedItemSql.id != ID_UNSET ||
+                        !feedSql.skipDuplicates ||
+                        !repository.duplicateStoryExists(
+                            id = feedItemSql.id,
+                            title = item.title ?: "",
+                            link = item.url,
+                        )
+                    ) {
+                        feedItemSql.updateFromParsedEntry(item, guid, parsedFeed, fallbackClock)
+                        feedItemSql.feedId = feedSql.id
+
+                        if (feedSql.fetchOgImages) {
+                            feedItemSql.thumbnailImage =
+                                resolveThumbnailImage(
+                                    current = feedItemSql.thumbnailImage,
+                                    articleUrl = item.url,
+                                    hasFeedImage = item.hasFeedImage,
+                                )
+                        }
+
+                        if (feedItemSql.guid in alreadyReadGuids) {
+                            // TODO get read time from sync service
+                            feedItemSql.readTime = feedItemSql.readTime ?: Instant.now()
+                            feedItemSql.notified = true
+                        }
+
+                        val archivePage = loadedFromPageForUpsert(feedItemSql.id, loadedFromPage)
+                        if (archivePage > 0) {
+                            feedItemSql.loadedFromPage = archivePage
+                            // History the user asked for. Do not raise a notification for it.
+                            feedItemSql.notified = true
+                            newCount += 1
+                        }
+
+                        feedItemSql to (item.content_html ?: item.content_text ?: "")
+                    } else {
+                        Log.i(LOG_TAG, "Duplicate story ignored: [${item.title}] [${parsedFeed.title}]")
+                        null
+                    }
+                }
+
+        repository.upsertFeedItems(feedItemSqls) { feedItem, text ->
+            filePathProvider.articleDir.mkdirs()
+            blobOutputStream(feedItem.id, filePathProvider.articleDir)
+                .bufferedWriter()
+                .use {
+                    it.write(text)
+                }
+            // If this item was pre-marked as read from a remote read-mark (alreadyReadGuids),
+            // immediately set it as synced so it won't be echoed back to the server.
+            if (feedItem.guid in alreadyReadGuids) {
+                repository.setSynced(feedItem.id)
+            }
+        }
+        return ParsedItemUpsert(
+            pairs = feedItemSqls,
+            parsedCount = items?.size ?: 0,
+            newCount = newCount,
+        )
+    }
+
+    suspend fun loadOlderArticles(feedId: Long): LoadOlderOutcome =
+        try {
+            syncMutex.withLock {
+                withContext(singleThreadedSync) {
+                    loadOlderArticlesLocked(feedId)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.e(LOG_TAG, "Failed to load older articles for feed $feedId", e)
+            LoadOlderOutcome.Failed
+        }
+
+    private suspend fun loadOlderArticlesLocked(feedId: Long): LoadOlderOutcome {
+        val feedSql = repository.getFeed(feedId) ?: return LoadOlderOutcome.NothingToLoad
+        if (!feedOffersOlderPages(feedSql.paginationMode, feedSql.paginationExhausted, feedSql.nextArchiveUrl)) {
+            return LoadOlderOutcome.NothingToLoad
+        }
+        if (feedSql.retryAfter > Instant.now()) {
+            Log.i(LOG_TAG, "Skipping older page for ${feedSql.displayTitle}; retry after ${feedSql.retryAfter}")
+            return LoadOlderOutcome.Failed
+        }
+        val pageUrl =
+            try {
+                URL(feedSql.nextArchiveUrl)
+            } catch (e: Exception) {
+                Log.w(LOG_TAG, "Bad older-page url ${feedSql.nextArchiveUrl}", e)
+                return LoadOlderOutcome.Failed
+            }
+
+        logDebug(LOG_TAG, "Fetching older page $pageUrl")
+        val previous =
+            PaginationCursor(
+                loadedPage = feedSql.loadedPage,
+                nextUrl = feedSql.nextArchiveUrl,
+                exhausted = feedSql.paginationExhausted,
+            )
+        val response =
+            try {
+                okHttpClient.getResponse(pageUrl, forceNetwork = true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(LOG_TAG, "Failed to fetch older page $pageUrl", e)
+                return LoadOlderOutcome.Failed
+            }
+
+        response.use {
+            when (val status = decisionForStatusCode(previous, response.code)) {
+                is StatusDecision.Retry -> {
+                    response.retryAfterSeconds?.let { retryAfterSeconds ->
+                        repository.setRetryAfterForFeedsWithBaseUrl(
+                            host = pageUrl.host.ifBlank { feedSql.url.host },
+                            retryAfter = Instant.now().plusSeconds(retryAfterSeconds),
+                        )
+                    }
+                    Log.w(LOG_TAG, "Older page HTTP ${response.code} for $pageUrl")
+                    return LoadOlderOutcome.Failed
+                }
+
+                is StatusDecision.Exhausted -> {
+                    feedSql.applyCursor(status.cursor)
+                    repository.upsertFeed(feedSql)
+                    return LoadOlderOutcome.NotFound
+                }
+
+                StatusDecision.Continue -> Unit
+            }
+
+            val body = response.body
+            val parsed =
+                feedParser.parseFeedResponse(
+                    response.request.url.toUrl(),
+                    body,
+                )
+            val parsedFeed =
+                when (parsed) {
+                    is Either.Left -> {
+                        Log.w(LOG_TAG, "Failed to parse older page $pageUrl: ${parsed.value.description}")
+                        return LoadOlderOutcome.Failed
+                    }
+
+                    is Either.Right -> parsed.value
+                }
+            val downloadTime = Instant.now()
+            val upserted =
+                upsertParsedFeedItems(
+                    feedSql = feedSql,
+                    parsedFeed = parsedFeed,
+                    downloadTime = downloadTime,
+                    loadedFromPage = feedSql.loadedPage + 1,
+                )
+            if (upserted.newCount > 0) {
+                repository.setBlockStatusForNewInFeed(feedId = feedSql.id, blockTime = downloadTime)
+            }
+            val decision =
+                decisionForParsedPage(
+                    feedUrl = feedSql.url.toString(),
+                    fetchedUrl = response.request.url.toString(),
+                    links =
+                        ExtractedFeedLinks(
+                            nextUrl = parsedFeed.next_url,
+                            prevArchiveUrl = parsedFeed.prev_archive_url,
+                            generator = parsedFeed.generator,
+                        ),
+                    mode = FeedPaginationMode.fromStored(feedSql.paginationMode),
+                    previous = previous,
+                    parsedItemCount = upserted.parsedCount,
+                    newItemCount = upserted.newCount,
+                )
+            val cursor =
+                when (decision) {
+                    is OlderPageDecision.Inserted -> decision.cursor
+                    is OlderPageDecision.Exhausted -> decision.cursor
+                }
+            feedSql.applyCursor(cursor)
+            repository.upsertFeed(feedSql)
+            if (feedSql.fullTextByDefault && upserted.newCount > 0) {
+                runOnceFullTextSync(
+                    di = di,
+                    triggeredByUser = false,
+                )
+            }
+            return when (decision) {
+                is OlderPageDecision.Inserted -> LoadOlderOutcome.Inserted
+                is OlderPageDecision.Exhausted ->
+                    if (decision.notFound) {
+                        LoadOlderOutcome.NotFound
+                    } else {
+                        LoadOlderOutcome.NoNewItems
+                    }
+            }
+        }
+    }
+
+    private fun applyLivePaginationCursor(
+        feedSql: Feed,
+        parsed: ParsedFeed,
+    ) {
+        val cursor =
+            cursorAfterLiveSync(
+                feedUrl = feedSql.url.toString(),
+                links =
+                    ExtractedFeedLinks(
+                        nextUrl = parsed.next_url,
+                        prevArchiveUrl = parsed.prev_archive_url,
+                        generator = parsed.generator,
+                    ),
+                mode = FeedPaginationMode.fromStored(feedSql.paginationMode),
+                previous =
+                    PaginationCursor(
+                        loadedPage = feedSql.loadedPage,
+                        nextUrl = feedSql.nextArchiveUrl,
+                        exhausted = feedSql.paginationExhausted,
+                    ),
+            )
+        feedSql.applyCursor(cursor)
+    }
+
+    private fun Feed.applyCursor(cursor: PaginationCursor) {
+        loadedPage = cursor.loadedPage
+        nextArchiveUrl = cursor.nextUrl
+        paginationExhausted = cursor.exhausted
+    }
 
     /**
      * Final thumbnail priority policy:

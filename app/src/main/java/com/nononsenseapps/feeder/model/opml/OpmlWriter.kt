@@ -2,6 +2,7 @@ package com.nononsenseapps.feeder.model.opml
 
 import android.util.Log
 import com.nononsenseapps.feeder.db.room.Feed
+import com.nononsenseapps.feeder.model.PAGINATION_MODE_AUTO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.FileOutputStream
@@ -257,6 +258,9 @@ abstract class BodyTag(
             openArticlesWith = feed.openArticlesWith
             alternateId = feed.alternateId
             fetchOgImages = feed.fetchOgImages
+            if (feed.paginationMode != PAGINATION_MODE_AUTO) {
+                paginationMode = feed.paginationMode
+            }
             feed.blockRules.takeIf { it.isNotBlank() }?.let { blockRules = escapeAttribute(it) }
             feed.allowRules.takeIf { it.isNotBlank() }?.let { allowRules = escapeAttribute(it) }
         }
@@ -318,6 +322,11 @@ class Outline : BodyTag("outline") {
         get() = attributes["feeder:fetchOgImages"]!!.toBoolean()
         set(value) {
             attributes["feeder:fetchOgImages"] = value.toString()
+        }
+    var paginationMode: String
+        get() = attributes["feeder:paginationMode"]!!
+        set(value) {
+            attributes["feeder:paginationMode"] = value
         }
     var blockRules: String
         get() = attributes["feeder:blockRules"]!!

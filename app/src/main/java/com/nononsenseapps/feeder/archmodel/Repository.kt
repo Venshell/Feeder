@@ -492,6 +492,8 @@ class Repository(
 
     suspend fun getFeed(feedId: Long): Feed? = feedStore.getFeed(feedId)
 
+    fun getFeedFlow(feedId: Long): Flow<Feed?> = feedStore.getFeedFlow(feedId)
+
     suspend fun getFeed(url: URL): Feed? = feedStore.getFeed(url)
 
     suspend fun saveFeed(feed: Feed): Long = feedStore.saveFeed(feed)

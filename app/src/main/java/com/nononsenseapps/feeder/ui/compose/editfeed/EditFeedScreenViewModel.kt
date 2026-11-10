@@ -15,6 +15,9 @@ import com.nononsenseapps.feeder.base.DIAwareViewModel
 import com.nononsenseapps.feeder.db.room.Feed
 import com.nononsenseapps.feeder.model.ArticleRuleError
 import com.nononsenseapps.feeder.model.ArticleRuleSet
+import com.nononsenseapps.feeder.model.PAGINATION_MODE_AUTO
+import com.nononsenseapps.feeder.model.PaginationFields
+import com.nononsenseapps.feeder.model.paginationFieldsOnSave
 import com.nononsenseapps.feeder.ui.compose.utils.mutableSavedStateOf
 import kotlinx.coroutines.launch
 import org.kodein.di.DI
@@ -50,6 +53,7 @@ class EditFeedScreenViewModel(
     override var alternateId: Boolean by mutableSavedStateOf(state, false)
     override var summarizeOnOpen: Boolean by mutableSavedStateOf(state, false)
     override var fetchOgImages: Boolean by mutableSavedStateOf(state, false)
+    override var paginationMode: String by mutableSavedStateOf(state, PAGINATION_MODE_AUTO)
 
     // Invalid rules deliberately do not block saving - a regex is invalid while being
     // typed, and the engine ignores invalid lines anyway.
@@ -135,6 +139,9 @@ class EditFeedScreenViewModel(
             if (!state.contains("allowRules")) {
                 allowRules = feed.allowRules
             }
+            if (!state.contains("paginationMode")) {
+                paginationMode = feed.paginationMode
+            }
 
             repository.allTags
                 .collect { value ->
@@ -149,6 +156,19 @@ class EditFeedScreenViewModel(
                 repository.getFeed(feedId)
                     ?: Feed() // Feed was deleted while being edited?
 
+            val pagination =
+                paginationFieldsOnSave(
+                    previous =
+                        PaginationFields(
+                            mode = feed.paginationMode,
+                            loadedPage = feed.loadedPage,
+                            nextUrl = feed.nextArchiveUrl,
+                            exhausted = feed.paginationExhausted,
+                        ),
+                    newMode = paginationMode,
+                    urlChanged = feed.url.toString() != feedUrl,
+                    feedUrl = feedUrl,
+                )
             val updatedFeed =
                 feed.copy(
                     url = URL(feedUrl),
@@ -164,6 +184,10 @@ class EditFeedScreenViewModel(
                     fetchOgImages = fetchOgImages,
                     blockRules = blockRules,
                     allowRules = allowRules,
+                    paginationMode = pagination.mode,
+                    loadedPage = pagination.loadedPage,
+                    nextArchiveUrl = pagination.nextUrl,
+                    paginationExhausted = pagination.exhausted,
                 )
 
             // No point in doing anything unless they actually differ

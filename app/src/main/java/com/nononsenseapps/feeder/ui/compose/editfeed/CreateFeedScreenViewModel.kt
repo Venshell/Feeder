@@ -15,6 +15,9 @@ import com.nononsenseapps.feeder.base.DIAwareViewModel
 import com.nononsenseapps.feeder.db.room.Feed
 import com.nononsenseapps.feeder.model.ArticleRuleError
 import com.nononsenseapps.feeder.model.ArticleRuleSet
+import com.nononsenseapps.feeder.model.PAGINATION_MODE_AUTO
+import com.nononsenseapps.feeder.model.PaginationFields
+import com.nononsenseapps.feeder.model.paginationFieldsOnSave
 import com.nononsenseapps.feeder.ui.compose.utils.mutableSavedStateOf
 import com.nononsenseapps.feeder.util.sloppyLinkToStrictURLOrNull
 import kotlinx.coroutines.launch
@@ -47,6 +50,7 @@ class CreateFeedScreenViewModel(
     override var alternateId: Boolean by mutableSavedStateOf(state, false)
     override var summarizeOnOpen: Boolean by mutableSavedStateOf(state, false)
     override var fetchOgImages: Boolean by mutableSavedStateOf(state, false)
+    override var paginationMode: String by mutableSavedStateOf(state, PAGINATION_MODE_AUTO)
 
     // Invalid rules deliberately do not block saving - a regex is invalid while being
     // typed, and the engine ignores invalid lines anyway.
@@ -94,6 +98,13 @@ class CreateFeedScreenViewModel(
 
     fun saveAndRequestSync(action: (Long) -> Unit) =
         viewModelScope.launch {
+            val pagination =
+                paginationFieldsOnSave(
+                    previous = PaginationFields(),
+                    newMode = paginationMode,
+                    urlChanged = true,
+                    feedUrl = feedUrl,
+                )
             val feedId =
                 repository.saveFeed(
                     Feed(
@@ -112,6 +123,10 @@ class CreateFeedScreenViewModel(
                         fetchOgImages = fetchOgImages,
                         blockRules = blockRules,
                         allowRules = allowRules,
+                        paginationMode = pagination.mode,
+                        loadedPage = pagination.loadedPage,
+                        nextArchiveUrl = pagination.nextUrl,
+                        paginationExhausted = pagination.exhausted,
                     ),
                 )
 

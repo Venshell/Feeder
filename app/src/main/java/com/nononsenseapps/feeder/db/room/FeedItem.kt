@@ -19,6 +19,7 @@ import com.nononsenseapps.feeder.db.COL_ID
 import com.nononsenseapps.feeder.db.COL_IMAGEURL
 import com.nononsenseapps.feeder.db.COL_IMAGE_FROM_BODY
 import com.nononsenseapps.feeder.db.COL_LINK
+import com.nononsenseapps.feeder.db.COL_LOADED_FROM_PAGE
 import com.nononsenseapps.feeder.db.COL_NOTIFIED
 import com.nononsenseapps.feeder.db.COL_PLAINSNIPPET
 import com.nononsenseapps.feeder.db.COL_PLAINTITLE
@@ -122,6 +123,10 @@ data class FeedItem
         @ColumnInfo(name = COL_WORD_COUNT) var wordCount: Int = 0,
         @ColumnInfo(name = COL_WORD_COUNT_FULL) var wordCountFull: Int = 0,
         @ColumnInfo(name = COL_BLOCK_TIME) var blockTime: Instant? = null,
+        // 0 means the row came from a normal sync of the subscription document.
+        // A positive value is the older page it was first inserted from, which
+        // exempts it from the max-items prune.
+        @ColumnInfo(name = COL_LOADED_FROM_PAGE) var loadedFromPage: Int = 0,
     ) : FeedItemForFetching,
         FeedItemCursor {
         constructor() : this(id = ID_UNSET)

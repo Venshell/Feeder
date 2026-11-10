@@ -15,8 +15,12 @@ import com.nononsenseapps.feeder.db.COL_FULLTEXT_BY_DEFAULT
 import com.nononsenseapps.feeder.db.COL_ID
 import com.nononsenseapps.feeder.db.COL_IMAGEURL
 import com.nononsenseapps.feeder.db.COL_LASTSYNC
+import com.nononsenseapps.feeder.db.COL_LOADED_PAGE
+import com.nononsenseapps.feeder.db.COL_NEXT_ARCHIVE_URL
 import com.nononsenseapps.feeder.db.COL_NOTIFY
 import com.nononsenseapps.feeder.db.COL_OPEN_ARTICLES_WITH
+import com.nononsenseapps.feeder.db.COL_PAGINATION_EXHAUSTED
+import com.nononsenseapps.feeder.db.COL_PAGINATION_MODE
 import com.nononsenseapps.feeder.db.COL_RESPONSEHASH
 import com.nononsenseapps.feeder.db.COL_RETRY_AFTER
 import com.nononsenseapps.feeder.db.COL_SITE_FETCHED
@@ -67,6 +71,13 @@ data class Feed
         @ColumnInfo(name = COL_FETCH_OG_IMAGES) var fetchOgImages: Boolean = false,
         @ColumnInfo(name = COL_BLOCK_RULES) var blockRules: String = "",
         @ColumnInfo(name = COL_ALLOW_RULES) var allowRules: String = "",
+        // AUTO, WORDPRESS, or OFF. See FeedPaginationMode.
+        @ColumnInfo(name = COL_PAGINATION_MODE) var paginationMode: String = "AUTO",
+        // Highest page index stored. 1 is the subscription document from normal sync.
+        @ColumnInfo(name = COL_LOADED_PAGE) var loadedPage: Int = 1,
+        // Absolute URL of the next older page. Empty when none is known.
+        @ColumnInfo(name = COL_NEXT_ARCHIVE_URL) var nextArchiveUrl: String = "",
+        @ColumnInfo(name = COL_PAGINATION_EXHAUSTED) var paginationExhausted: Boolean = false,
     ) {
         constructor() : this(id = ID_UNSET)
 

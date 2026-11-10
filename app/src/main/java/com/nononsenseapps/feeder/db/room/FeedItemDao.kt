@@ -60,7 +60,7 @@ interface FeedItemDao {
     @Query(
         """
         SELECT id FROM feed_items
-        WHERE feed_id IS :feedId AND bookmarked = 0
+        WHERE feed_id IS :feedId AND bookmarked = 0 AND loaded_from_page = 0
         ORDER BY primary_sort_time DESC, pub_date DESC
         LIMIT -1 OFFSET :keepCount
         """,

@@ -299,6 +299,16 @@
     <string name="failed_to_import_saved_articles">无法导入已保存的文章</string>
     <string name="fetch_og_images">从文章元数据增强缩略图</string>
     <string name="fetch_og_images_desc">尝试改进此订阅源中缺失或质量较低的缩略图</string>
+    <string name="load_older_articles">加载更早的文章</string>
+    <string name="loading_older_articles">正在加载更早的文章…</string>
+    <string name="no_older_articles">没有更早的文章</string>
+    <string name="load_older_failed">无法加载更早的文章</string>
+    <string name="load_older_retry">重试</string>
+    <string name="older_articles">更早的文章</string>
+    <string name="older_articles_desc">获取最新一页之外的文章。自动模式会在订阅源提供 RFC 5005 链接时使用它；若订阅源由 WordPress 生成，则使用 ?paged= 分页。</string>
+    <string name="older_articles_auto">自动</string>
+    <string name="older_articles_wordpress">WordPress 分页</string>
+    <string name="older_articles_off">关闭</string>
     <string name="summary_api_settings">摘要 API</string>
     <string name="summary_api_settings_info">用于文章摘要。</string>
     <string name="translation_api_settings">翻译 API</string>
